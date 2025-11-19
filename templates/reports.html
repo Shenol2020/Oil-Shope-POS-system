@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+
+{% block title %}Reports - Oil Shop Management{% endblock %}
+{% block page_title %}Reports & Analytics{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Date Filter -->
+    <div class="card card-custom mb-4">
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3">
+                    <label class="form-label">Start Date</label>
+                    <input type="date" class="form-control" id="startDate">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">End Date</label>
+                    <input type="date" class="form-control" id="endDate">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">&nbsp;</label>
+                    <button class="btn btn-primary w-100" onclick="filterReports()">
+                        <i class="bi bi-filter"></i> Apply Filter
+                    </button>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">&nbsp;</label>
+                    <button class="btn btn-secondary w-100" onclick="resetFilter()">
+                        <i class="bi bi-arrow-clockwise"></i> Reset
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="row">
+        <div class="col-md-3">
+            <div class="stat-card blue">
+                <i class="bi bi-cart-check" style="font-size: 2em; opacity: 0.8;"></i>
+                <h3 id="totalSales">0</h3>
+                <p>Total Sales</p>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card green">
+                <i class="bi bi-currency-dollar" style="font-size: 2em; opacity: 0.8;"></i>
+                <h3 id="totalRevenue">$0.00</h3>
+                <p>Total Revenue</p>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card orange">
+                <i class="bi bi-graph-up" style="font-size: 2em; opacity: 0.8;"></i>
+                <h3 id="avgSale">$0.00</h3>
+                <p>Average Sale</p>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card purple">
+                <i class="bi bi-box-seam" style="font-size: 2em; opacity: 0.8;"></i>
+                <h3 id="totalItems">0</h3>
+                <p>Items Sold</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card card-custom">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="bi bi-bar-chart"></i> Sales Overview
+                    </h5>
+                    <canvas id="salesChart"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card card-custom">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="bi bi-pie-chart"></i> Top Products
+                    </h5>
+                    <canvas id="productsChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sales Report Table -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card card-custom">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="bi bi-table"></i> Detailed Sales Report
+                    </h5>
+                    <div class="table-responsive">
+                        <table class="table table-custom">
+                            <thead>
+                                <tr>
+                                    <th>Invoice #</th>
+                                    <th>Date</th>
+                                    <th>Items</th>
+                                    <th>Subtotal</th>
+                                    <th>Discount</th>
+                                    <th>Total</th>
+                                    <th>Payment</th>
+                                    <th>Employee</th>
+                                </tr>
+                            </thead>
+                            <tbody id="salesReportTable">
+                                <tr>
+                                    <td colspan="8" class="text-center">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">Loading...</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+    let salesData = [];
+    let salesChart, productsChart;
+
+    // Set default dates (last 30 days)
+    function setDefaultDates() {
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - 30);
+        
+        document.getElementById('startDate').value = startDate.toISOString().split('T')[0];
+        document.getElementById('endDate').value = endDate.toISOString().split('T')[0];
+    }
+
+    async function loadReports() {
+        const startDate = document.getElementById('startDate').value;
+        const endDate = document.getElementById('endDate').value;
+        
+        try {
+            const response = await fetch(`/api/sales?start_date=${startDate}&end_date=${endDate}`);
+            salesData = await response.json();
+            
+            updateSummaryStats();
+            updateCharts();
+            displaySalesReport();
+        } catch (error) {
+            console.error('Error loading reports:', error);
+            showAlert('Error loading reports', 'danger');
+        }
+    }
+
+    function updateSummaryStats() {
+        const totalSales = salesData.length;
+        const totalRevenue = salesData.reduce((sum, sale) => sum + parseFloat(sale.total_amount), 0);
+        const avgSale = totalSales > 0 ? totalRevenue / totalSales : 0;
+        const totalItems = salesData.reduce((sum, sale) => sum + sale.items_count, 0);
+        
+        document.getElementById('totalSales').textContent = totalSales;
+        document.getElementById('totalRevenue').textContent = formatCurrency(totalRevenue);
+        document.getElementById('avgSale').textContent = formatCurrency(avgSale);
+        document.getElementById('totalItems').textContent = totalItems;
+    }
+
+    function updateCharts() {
+        // Sales by date chart
+        const salesByDate = {};
+        salesData.forEach(sale => {
+            const date = sale.created_at.split(' ')[0];
+            salesByDate[date] = (salesByDate[date] || 0) + parseFloat(sale.total_amount);
+        });
+        
+        const dates = Object.keys(salesByDate).sort();
+        const amounts = dates.map(date => salesByDate[date]);
+        
+        if (salesChart) salesChart.destroy();
+        
+        const ctx1 = document.getElementById('salesChart').getContext('2d');
+        salesChart = new Chart(ctx1, {
+            type: 'line',
+            data: {
+                labels: dates,
+                datasets: [{
+                    label: 'Sales Revenue',
+                    data: amounts,
+                    borderColor: 'rgb(102, 126, 234)',
+                    backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                    tension: 0.4,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: true },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return 'Revenue: ' + formatCurrency(context.parsed.y);
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return '$' + value.toFixed(0);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Top products chart - Placeholder (would need product sales data)
+        if (productsChart) productsChart.destroy();
+        
+        const ctx2 = document.getElementById('productsChart').getContext('2d');
+        productsChart = new Chart(ctx2, {
+            type: 'doughnut',
+            data: {
+                labels: ['Category 1', 'Category 2', 'Category 3', 'Category 4'],
+                datasets: [{
+                    data: [30, 25, 25, 20],
+                    backgroundColor: [
+                        'rgba(102, 126, 234, 0.8)',
+                        'rgba(118, 75, 162, 0.8)',
+                        'rgba(17, 153, 142, 0.8)',
+                        'rgba(56, 239, 125, 0.8)'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'bottom' }
+                }
+            }
+        });
+    }
+
+    function displaySalesReport() {
+        const tbody = document.getElementById('salesReportTable');
+        
+        if (salesData.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center">No sales found for the selected period</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = salesData.map(sale => {
+            const subtotal = parseFloat(sale.total_amount) + parseFloat(sale.discount);
+            return `
+                <tr>
+                    <td>#${sale.id}</td>
+                    <td>${formatDate(sale.created_at)}</td>
+                    <td><span class="badge bg-info">${sale.items_count}</span></td>
+                    <td>${formatCurrency(subtotal)}</td>
+                    <td>${formatCurrency(sale.discount)}</td>
+                    <td><strong>${formatCurrency(sale.total_amount)}</strong></td>
+                    <td><span class="badge bg-success">${sale.payment_method}</span></td>
+                    <td>${sale.employee_name || 'N/A'}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    function filterReports() {
+        loadReports();
+    }
+
+    function resetFilter() {
+        setDefaultDates();
+        loadReports();
+    }
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', function() {
+        setDefaultDates();
+        loadReports();
+    });
+</script>
+{% endblock %}

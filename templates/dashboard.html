@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Oil Shop Management{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Stats Cards -->
+    <div class="row">
+        <div class="col-md-3">
+            <div class="stat-card blue">
+                <i class="bi bi-currency-dollar" style="font-size: 2em; opacity: 0.8;"></i>
+                <h3 id="todaySales">Rs.0.00</h3>
+                <p>Today's Sales</p>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card green">
+                <i class="bi bi-box-seam" style="font-size: 2em; opacity: 0.8;"></i>
+                <h3 id="totalProducts">0</h3>
+                <p>Total Products</p>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card orange">
+                <i class="bi bi-exclamation-triangle" style="font-size: 2em; opacity: 0.8;"></i>
+                <h3 id="lowStock">0</h3>
+                <p>Low Stock Alerts</p>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card purple">
+                <i class="bi bi-graph-up" style="font-size: 2em; opacity: 0.8;"></i>
+                <h3 id="monthlySales">Rs.0</h3>
+                <p>Monthly Sales</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts and Tables Row -->
+    <div class="row mt-4">
+        <!-- Recent Sales -->
+        <div class="col-md-8">
+            <div class="card card-custom">
+                <div class="card-body">
+                    <h5 class="card-title mb-4">
+                        <i class="bi bi-clock-history"></i> Recent Sales
+                    </h5>
+                    <div class="table-responsive">
+                        <table class="table table-custom">
+                            <thead>
+                                <tr>
+                                    <th>Invoice #</th>
+                                    <th>Items</th>
+                                    <th>Amount</th>
+                                    <th>Date</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recentSalesTable">
+                                <tr>
+                                    <td colspan="5" class="text-center">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">Loading...</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Low Stock Alerts -->
+        <div class="col-md-4">
+            <div class="card card-custom">
+                <div class="card-body">
+                    <h5 class="card-title mb-4">
+                        <i class="bi bi-exclamation-circle"></i> Low Stock Alerts
+                    </h5>
+                    <div id="lowStockList" style="max-height: 400px; overflow-y: auto;">
+                        <div class="text-center">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card card-custom">
+                <div class="card-body">
+                    <h5 class="card-title mb-4">
+                        <i class="bi bi-lightning-fill"></i> Quick Actions
+                    </h5>
+                    <div class="row">
+                        <div class="col-md-3 mb-3">
+                            <a href="/sales" class="btn btn-primary btn-custom w-100">
+                                <i class="bi bi-cart-plus"></i> New Sale
+                            </a>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <a href="/inventory" class="btn btn-success btn-custom w-100">
+                                <i class="bi bi-plus-circle"></i> Add Product
+                            </a>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <a href="/reports" class="btn btn-info btn-custom w-100">
+                                <i class="bi bi-file-earmark-text"></i> View Reports
+                            </a>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <a href="/suppliers" class="btn btn-warning btn-custom w-100">
+                                <i class="bi bi-truck"></i> Manage Suppliers
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Load dashboard data
+    async function loadDashboardStats() {
+        try {
+            const response = await fetch('/api/dashboard/stats');
+            const data = await response.json();
+            
+            document.getElementById('todaySales').textContent = formatCurrency(data.today_sales);
+            document.getElementById('totalProducts').textContent = data.total_products;
+            document.getElementById('lowStock').textContent = data.low_stock_count;
+            document.getElementById('monthlySales').textContent = formatCurrency(data.monthly_sales);
+        } catch (error) {
+            console.error('Error loading stats:', error);
+        }
+    }
+
+    async function loadRecentSales() {
+        try {
+            const response = await fetch('/api/sales');
+            const sales = await response.json();
+            
+            const tbody = document.getElementById('recentSalesTable');
+            if (sales.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center">No sales yet</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = sales.slice(0, 5).map(sale => `
+                <tr>
+                    <td>#${sale.id}</td>
+                    <td><span class="badge bg-info">${sale.items_count} items</span></td>
+                    <td><strong>${formatCurrency(sale.total_amount)}</strong></td>
+                    <td>${formatDate(sale.created_at)}</td>
+                    <td>
+                        <button class="btn btn-sm btn-primary" onclick="viewInvoice(${sale.id})">
+                            <i class="bi bi-file-earmark-pdf"></i>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        } catch (error) {
+            console.error('Error loading sales:', error);
+            document.getElementById('recentSalesTable').innerHTML = 
+                '<tr><td colspan="5" class="text-center text-danger">Error loading sales</td></tr>';
+        }
+    }
+
+    async function loadLowStock() {
+        try {
+            const response = await fetch('/api/inventory/low-stock');
+            const products = await response.json();
+            
+            const container = document.getElementById('lowStockList');
+            if (products.length === 0) {
+                container.innerHTML = '<p class="text-center text-muted">No low stock items</p>';
+                return;
+            }
+            
+            container.innerHTML = products.map(product => `
+                <div class="product-item mb-2">
+                    <div>
+                        <strong>${product.name}</strong><br>
+                        <small class="text-muted">${product.category}</small>
+                    </div>
+                    <div class="text-end">
+                        <span class="badge bg-danger">${product.quantity} left</span><br>
+                        <small class="text-muted">Min: ${product.min_stock_level}</small>
+                    </div>
+                </div>
+            `).join('');
+        } catch (error) {
+            console.error('Error loading low stock:', error);
+            document.getElementById('lowStockList').innerHTML = 
+                '<p class="text-center text-danger">Error loading data</p>';
+        }
+    }
+
+    function viewInvoice(saleId) {
+        window.open(`/api/sales/${saleId}/invoice`, '_blank');
+    }
+
+    // Load all data on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        loadDashboardStats();
+        loadRecentSales();
+        loadLowStock();
+        
+        // Refresh stats every 30 seconds
+        setInterval(loadDashboardStats, 30000);
+    });
+</script>
+{% endblock %}

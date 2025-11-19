@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+
+{% block title %}Users - Oil Shop Management{% endblock %}
+{% block page_title %}User Management{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-md-9">
+            <h5>Manage system users </h5>
+        </div>
+        <div class="col-md-3">
+            <button class="btn btn-primary w-100" data-bs-toggle="modal" data-bs-target="#userModal" onclick="resetUserForm()">
+                <i class="bi bi-person-plus"></i> Add User
+            </button>
+        </div>
+    </div>
+
+    <div class="card card-custom">
+        <div class="card-body">
+            <h5 class="card-title">
+                <i class="bi bi-people"></i> User List
+            </h5>
+            <div class="table-responsive">
+                <table class="table table-custom">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Username</th>
+                            <th>Role</th>
+                            <th>Created Date</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="usersTable">
+                        <tr>
+                            <td colspan="5" class="text-center">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Role Information -->
+    <div class="row mt-4">
+        <div class="col-md-4">
+            <div class="card card-custom">
+                <div class="card-body">
+                    <h5 class="text-primary"><i class="bi bi-shield-check"></i> Admin</h5>
+                    <p>Full system access including:</p>
+                    <ul>
+                        <li>Manage all users</li>
+                        <li>View all reports</li>
+                        <li>Manage products & suppliers</li>
+                        <li>Process sales</li>
+                        <li>Delete records</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card card-custom">
+                <div class="card-body">
+                    <h5 class="text-success"><i class="bi bi-person-badge"></i> Manager</h5>
+                    <p>Management access including:</p>
+                    <ul>
+                        <li>View reports</li>
+                        <li>Manage products & suppliers</li>
+                        <li>Process sales</li>
+                        <li>View inventory</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card card-custom">
+                <div class="card-body">
+                    <h5 class="text-info"><i class="bi bi-person"></i> Staff</h5>
+                    <p>Basic access including:</p>
+                    <ul>
+                        <li>Process sales</li>
+                        <li>View inventory</li>
+                        <li>View limited reports</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- User Modal -->
+<div class="modal fade" id="userModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add New User</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="userForm">
+                    <div class="mb-3">
+                        <label class="form-label">Username *</label>
+                        <input type="text" class="form-control" id="username" required>
+                        <small class="text-muted">Use a unique username for login</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Password *</label>
+                        <input type="password" class="form-control" id="password" required>
+                        <small class="text-muted">Minimum 6 characters</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Role *</label>
+                        <select class="form-select" id="role" required>
+                            <option value="">Select Role</option>
+                            <option value="admin">Admin</option>
+                            <option value="manager">Manager</option>
+                            <option value="staff">Staff</option>
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveUser()">Create User</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let users = [];
+
+    async function loadUsers() {
+        try {
+            const response = await fetch('/api/users');
+            users = await response.json();
+            displayUsers();
+        } catch (error) {
+            console.error('Error loading users:', error);
+            showAlert('Error loading users', 'danger');
+        }
+    }
+
+    function displayUsers() {
+        const tbody = document.getElementById('usersTable');
+        
+        if (users.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center">No users found</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = users.map(user => {
+            const roleBadge = user.role === 'admin' ? 'bg-primary' : 
+                            user.role === 'manager' ? 'bg-success' : 'bg-info';
+            
+            return `
+                <tr>
+                    <td>${user.id}</td>
+                    <td><strong>${user.username}</strong></td>
+                    <td><span class="badge ${roleBadge}">${user.role.toUpperCase()}</span></td>
+                    <td>${formatDate(user.created_at)}</td>
+                    <td>
+                        <button class="btn btn-sm btn-danger" onclick="deleteUser(${user.id}, '${user.username}')">
+                            <i class="bi bi-trash"></i> Delete
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    function resetUserForm() {
+        document.getElementById('userForm').reset();
+    }
+
+    async function saveUser() {
+        const form = document.getElementById('userForm');
+        if (!form.checkValidity()) {
+            form.reportValidity();
+            return;
+        }
+
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+        const role = document.getElementById('role').value;
+
+        if (password.length < 6) {
+            showAlert('Password must be at least 6 characters', 'warning');
+            return;
+        }
+
+        const userData = { username, password, role };
+
+        try {
+            const response = await fetch('/api/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(userData)
+            });
+
+            const result = await response.json();
+            
+            if (response.ok && result.success) {
+                showAlert('User created successfully', 'success');
+                bootstrap.Modal.getInstance(document.getElementById('userModal')).hide();
+                loadUsers();
+            } else {
+                showAlert(result.error || 'Error creating user', 'danger');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showAlert('Error creating user', 'danger');
+        }
+    }
+
+    async function deleteUser(id, username) {
+        if (!confirm(`Are you sure you want to delete user "${username}"?`)) return;
+
+        try {
+            const response = await fetch(`/api/users/${id}`, { method: 'DELETE' });
+            const result = await response.json();
+            
+            if (response.ok && result.success) {
+                showAlert('User deleted successfully', 'success');
+                loadUsers();
+            } else {
+                showAlert(result.error || 'Error deleting user', 'danger');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showAlert('Error deleting user', 'danger');
+        }
+    }
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', function() {
+        loadUsers();
+    });
+</script>
+{% endblock %}
