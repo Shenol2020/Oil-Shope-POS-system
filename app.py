@@ -10,6 +10,10 @@ import io
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import inch
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
 import os
 
 app = Flask(__name__)
@@ -19,7 +23,7 @@ app.secret_key = 'your-secret-key-change-in-production'
 DB_CONFIG = {
     'host': 'localhost',
     'user': 'root',
-    'password': '1234',  # Change this
+    'password': '1234',  
     'database': 'oil_shop_db'
 }
 
@@ -116,12 +120,6 @@ def sales_page():
 @login_required
 def inventory_page():
     return render_template('inventory.html', user=current_user)
-
-@app.route('/stock-adjustment')
-@login_required
-@role_required('admin', 'manager')
-def stock_adjustment_page():
-    return render_template('stock_adjustment.html', user=current_user)
 
 @app.route('/suppliers')
 @login_required
@@ -503,104 +501,6 @@ def get_low_stock():
         return jsonify(products)
     return jsonify({'error': 'Database connection failed'}), 500
 
-# Manual Stock Adjustment APIs
-@app.route('/api/inventory/adjust', methods=['POST'])
-@login_required
-@role_required('admin', 'manager')
-def adjust_stock():
-    data = request.get_json()
-    conn = get_db_connection()
-    if conn:
-        cursor = conn.cursor(dictionary=True)
-        try:
-            # Get current product quantity
-            cursor.execute("SELECT quantity, name FROM products WHERE id = %s", (data['product_id'],))
-            product = cursor.fetchone()
-            
-            if not product:
-                return jsonify({'error': 'Product not found'}), 404
-            
-            old_quantity = product['quantity']
-            adjustment_type = data['adjustment_type']  # 'add' or 'subtract'
-            adjustment_quantity = data['quantity']
-            
-            # Calculate new quantity
-            if adjustment_type == 'add':
-                new_quantity = old_quantity + adjustment_quantity
-            elif adjustment_type == 'subtract':
-                new_quantity = old_quantity - adjustment_quantity
-                if new_quantity < 0:
-                    return jsonify({'error': 'Cannot reduce stock below zero'}), 400
-            else:
-                return jsonify({'error': 'Invalid adjustment type'}), 400
-            
-            # Update product quantity
-            cursor.execute("""
-                UPDATE products SET quantity = %s WHERE id = %s
-            """, (new_quantity, data['product_id']))
-            
-            # Log the adjustment (create this table in your database)
-            cursor.execute("""
-                INSERT INTO stock_adjustments 
-                (product_id, old_quantity, new_quantity, adjustment_quantity, 
-                 adjustment_type, reason, employee_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (data['product_id'], old_quantity, new_quantity, adjustment_quantity,
-                  adjustment_type, data.get('reason', ''), current_user.id))
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-            return jsonify({
-                'success': True, 
-                'old_quantity': old_quantity,
-                'new_quantity': new_quantity
-            })
-        except Error as e:
-            conn.rollback()
-            cursor.close()
-            conn.close()
-            return jsonify({'error': str(e)}), 400
-    return jsonify({'error': 'Database connection failed'}), 500
-
-@app.route('/api/inventory/adjustments', methods=['GET'])
-@login_required
-@role_required('admin', 'manager')
-def get_stock_adjustments():
-    product_id = request.args.get('product_id')
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
-    
-    conn = get_db_connection()
-    if conn:
-        cursor = conn.cursor(dictionary=True)
-        query = """
-            SELECT sa.*, p.name as product_name, p.barcode,
-                   e.username as employee_name
-            FROM stock_adjustments sa
-            JOIN products p ON sa.product_id = p.id
-            JOIN employees e ON sa.employee_id = e.id
-            WHERE 1=1
-        """
-        params = []
-        
-        if product_id:
-            query += " AND sa.product_id = %s"
-            params.append(product_id)
-        
-        if start_date and end_date:
-            query += " AND DATE(sa.created_at) BETWEEN %s AND %s"
-            params.extend([start_date, end_date])
-        
-        query += " ORDER BY sa.created_at DESC LIMIT 100"
-        
-        cursor.execute(query, params)
-        adjustments = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        return jsonify(adjustments)
-    return jsonify({'error': 'Database connection failed'}), 500
-
 # User Management APIs
 @app.route('/api/users', methods=['GET'])
 @login_required
@@ -694,55 +594,160 @@ def generate_invoice(sale_id):
         cursor.close()
         conn.close()
         
-        # Generate PDF
+        # Generate Modern PDF
         buffer = io.BytesIO()
-        p = canvas.Canvas(buffer, pagesize=letter)
-        width, height = letter
+        doc = SimpleDocTemplate(buffer, pagesize=letter, 
+                              rightMargin=0.5*inch, leftMargin=0.5*inch,
+                              topMargin=0.5*inch, bottomMargin=0.5*inch)
+        
+        elements = []
+        styles = getSampleStyleSheet()
+        
+        # Custom styles - ALL BLACK
+        title_style = styles['Heading1']
+        title_style.alignment = TA_CENTER
+        title_style.textColor = colors.black
+        title_style.fontSize = 28
+        title_style.spaceAfter = 5
+        
+        subtitle_style = styles['Normal']
+        subtitle_style.alignment = TA_CENTER
+        subtitle_style.textColor = colors.black
+        subtitle_style.fontSize = 12
+        subtitle_style.spaceAfter = 20
         
         # Header
-        p.setFont("Helvetica-Bold", 20)
-        p.drawString(1*inch, height - 1*inch, "OIL SHOP INVOICE")
+        elements.append(Paragraph("OIL SHOP INVOICE", title_style))
+        elements.append(Spacer(1, 0.2*inch))
         
-        # Invoice details
-        p.setFont("Helvetica", 10)
-        y = height - 1.5*inch
-        p.drawString(1*inch, y, f"Invoice #: {sale_id}")
-        p.drawString(1*inch, y - 0.2*inch, f"Date: {sale['created_at']}")
-        p.drawString(1*inch, y - 0.4*inch, f"Customer: {sale['customer_name']}")
-        p.drawString(1*inch, y - 0.6*inch, f"Phone: {sale['customer_phone']}")
+        # Company Info Box
+        company_data = [
+            ['Oil Shop Management System', '', f'Invoice #: INV-{sale_id:05d}'],
+            ['123 Business Street', '', f'Date: {sale["created_at"].strftime("%Y-%m-%d %H:%M") if isinstance(sale["created_at"], datetime) else sale["created_at"]}'],
+            ['City, State 12345', '', f'Cashier: {sale["employee_name"]}'],
+            ['Phone: (123) 456-7890', '', f'Payment: {sale["payment_method"].upper()}']
+        ]
         
-        # Items table
-        y = y - 1.2*inch
-        p.setFont("Helvetica-Bold", 10)
-        p.drawString(1*inch, y, "Product")
-        p.drawString(4*inch, y, "Qty")
-        p.drawString(5*inch, y, "Price")
-        p.drawString(6*inch, y, "Subtotal")
+        company_table = Table(company_data, colWidths=[2.5*inch, 2*inch, 2.5*inch])
+        company_table.setStyle(TableStyle([
+            ('FONT', (0, 0), (-1, -1), 'Helvetica', 9),
+            ('FONT', (2, 0), (2, 0), 'Helvetica-Bold', 11),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (1, -1), 'LEFT'),
+            ('ALIGN', (2, 0), (2, -1), 'RIGHT'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ]))
+        elements.append(company_table)
+        elements.append(Spacer(1, 0.3*inch))
         
-        y -= 0.3*inch
-        p.setFont("Helvetica", 10)
+        # Customer Info Section
+        if sale.get('customer_phone'):
+            customer_data = [
+                ['BILL TO:', ''],
+                [f"Phone: {sale['customer_phone']}", '']
+            ]
+            customer_table = Table(customer_data, colWidths=[3.5*inch, 3.5*inch])
+            customer_table.setStyle(TableStyle([
+                ('FONT', (0, 0), (0, 0), 'Helvetica-Bold', 10),
+                ('FONT', (0, 1), (-1, -1), 'Helvetica', 9),
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ]))
+            elements.append(customer_table)
+            elements.append(Spacer(1, 0.2*inch))
         
-        for item in items:
-            p.drawString(1*inch, y, item['product_name'][:30])
-            p.drawString(4*inch, y, str(item['quantity']))
-            p.drawString(5*inch, y, f"${item['price']:.2f}")
-            p.drawString(6*inch, y, f"${item['subtotal']:.2f}")
-            y -= 0.2*inch
+        # Items Table Header
+        items_data = [['#', 'Product Name', 'Qty', 'Unit Price', 'Subtotal']]
         
-        # Totals
-        y -= 0.3*inch
-        p.setFont("Helvetica-Bold", 10)
-        p.drawString(5*inch, y, "Discount:")
-        p.drawString(6*inch, y, f"${sale['discount']:.2f}")
-        y -= 0.2*inch
-        p.drawString(5*inch, y, "Total:")
-        p.drawString(6*inch, y, f"${sale['total_amount']:.2f}")
+        # Items rows
+        for idx, item in enumerate(items, 1):
+            items_data.append([
+                str(idx),
+                item['product_name'][:35],
+                str(item['quantity']),
+                f"${item['price']:.2f}",
+                f"${item['subtotal']:.2f}"
+            ])
         
-        p.showPage()
-        p.save()
+        items_table = Table(items_data, colWidths=[0.5*inch, 3.5*inch, 1*inch, 1.2*inch, 1.3*inch])
+        items_table.setStyle(TableStyle([
+            # Header styling
+            ('BACKGROUND', (0, 0), (-1, 0), colors.black),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            
+            # Body styling
+            ('FONT', (0, 1), (-1, -1), 'Helvetica', 9),
+            ('ALIGN', (0, 1), (0, -1), 'CENTER'),
+            ('ALIGN', (1, 1), (1, -1), 'LEFT'),
+            ('ALIGN', (2, 1), (-1, -1), 'RIGHT'),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+            
+            # Grid - ALL BLACK BORDERS
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('BOX', (0, 0), (-1, -1), 2, colors.black),
+            
+            # Padding
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 5),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        elements.append(items_table)
+        elements.append(Spacer(1, 0.3*inch))
+        
+        # Calculate totals
+        subtotal = sum(item['subtotal'] for item in items)
+        
+        # Totals Table
+        totals_data = [
+            ['', '', 'Subtotal:', f"${subtotal:.2f}"],
+            ['', '', 'Discount:', f"-${sale['discount']:.2f}"],
+            ['', '', 'TOTAL:', f"${sale['total_amount']:.2f}"]
+        ]
+        
+        totals_table = Table(totals_data, colWidths=[2*inch, 2.5*inch, 1.5*inch, 1.5*inch])
+        totals_table.setStyle(TableStyle([
+            ('FONT', (2, 0), (2, 1), 'Helvetica', 10),
+            ('FONT', (2, 2), (2, 2), 'Helvetica-Bold', 12),
+            ('FONT', (3, 0), (3, 1), 'Helvetica', 10),
+            ('FONT', (3, 2), (3, 2), 'Helvetica-Bold', 12),
+            ('ALIGN', (2, 0), (-1, -1), 'RIGHT'),
+            ('TEXTCOLOR', (2, 0), (-1, -1), colors.black),
+            ('BACKGROUND', (2, 2), (3, 2), colors.white),
+            ('GRID', (2, 0), (3, -1), 1, colors.black),
+            ('BOX', (2, 0), (3, -1), 2, colors.black),
+            ('TOPPADDING', (2, 0), (3, -1), 5),
+            ('BOTTOMPADDING', (2, 0), (3, -1), 5),
+            ('RIGHTPADDING', (2, 0), (3, -1), 10),
+        ]))
+        elements.append(totals_table)
+        elements.append(Spacer(1, 0.5*inch))
+        
+        # Footer
+        footer_style = styles['Normal']
+        footer_style.alignment = TA_CENTER
+        footer_style.fontSize = 9
+        footer_style.textColor = colors.black
+        
+        elements.append(Paragraph("─" * 80, footer_style))
+        elements.append(Spacer(1, 0.1*inch))
+        elements.append(Paragraph("Thank you for your business!", footer_style))
+        elements.append(Paragraph("This is a computer-generated invoice.", footer_style))
+        elements.append(Spacer(1, 0.1*inch))
+        elements.append(Paragraph("For queries, contact: support@.com | www.temp.com", footer_style))
+        
+        # Build PDF
+        doc.build(elements)
         
         buffer.seek(0)
-        return send_file(buffer, as_attachment=True, download_name=f'invoice_{sale_id}.pdf', mimetype='application/pdf')
+        return send_file(buffer, as_attachment=True, 
+                        download_name=f'invoice_{sale_id}.pdf', 
+                        mimetype='application/pdf')
     
     return jsonify({'error': 'Sale not found'}), 404
 
